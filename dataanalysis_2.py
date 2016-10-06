@@ -32,9 +32,13 @@ def opt_parser():
     parse.add_option('-c', '--centers', metavar='CENTERTYPE', default=False,
                     help='the center type can either be "emp" or "pop" ')
 
+    isemp = 0
     opts, args = parse.parse_args()
+    opts_c = opts.centers
     if not opts.centers:
-        parse.error("option -c required, either 'emp' or 'pop'")
+        opts_c = "pop"
+        isemp = 0
+        print "No centertype given. Default to be pop"
     elif opts.centers == 'emp':
         isemp = 1
     elif opts.centers == 'pop':
@@ -43,34 +47,64 @@ def opt_parser():
         parse.error("-c option needs to be either 'emp' or 'pop'")
 
     attrbasketnum = int(sys.argv[1]) #number of tick bins
-    return{'bnum':attrbasketnum,'ctype': isemp}
 
+    return{'bnum':attrbasketnum,'ctype': isemp, 'c_opts':opts_c}
 
 
 #Data loader
 def data_loader(isemp):
-    landroadclassmap = "./Data/2006asc.txt"    # load land-use map
+    isemp = opt_parser()['ctype']
 
-
-    if ISEMP == 1:
-        centerlist = "./Data/empcenterlist.txt" # load center list
+    #load different center map data based on different options
+    if isemp == 1:
+        #centerlist = "./Data/empcenterlist.txt" # load center list
         attrmap = "./Data/emp_att.txt" # load attraction/travel-cost map
-        freqmap = "./Data/analysis/emp/attrfreq-commericial.png" #frequency map creation
+        #freqmap = "./Data/analysis/emp/attrfreq-commericial" #frequency map creation
 
     else:
-        centerlist = "./Data/popcenterlist.txt"
+        #centerlist = "./Data/popcenterlist.txt"
         attrmap = "./Data/pop_att.txt"
-        freqmap = "./Data/analysis/pop/attrfreq-commericial.png"
+        #freqmap = "./Data/analysis/pop/attrfreq-commericial.png"
 
-    RESIDENTIALMIN = 21
-    RESIDENTIALMAX = 22
-    COMMERCIALMIN  = 23
-    COMMERCIALMAX  = 24
-    ROADCLASSMAX   = 6
+    # load and flatten array for land-use class  for each cell
+    landroadclassmap_file = "./Data/2006asc.txt"  # load land-use map
+    landroadclassmap = pd.read_csv(landroadclassmap_file, sep=r"\s+", skiprows=6, header=None)
+    landroad_arr = landroadclassmap.values.flatten()
+
+    # load and flatten array for attribute values for each cell
+    attrmap = pd.read_csv(attrmap, sep=r"\s+", skiprows=6, header=None)
+    attrmap = attrmap.round().astype(np.int)
+    attr_arr_org = attrmap.values.flatten()
+
+
+    # create mask for all cells and residential cells
+    all_cells = np.array([21, 22, 31, 41, 42, 43, 52, 71, 81, 82, 85])
+    res_cells = np.array([21, 22])
+
+    #find the location of those cells in the mask
+    mask_all = np.in1d(landroad_arr, all_cells)
+    mask_res = np.in1d(landroad_arr, res_cells)
+
+    #create shortened arrays
+    attr_arr = attr_arr_org[mask_all]
+    attr_res_arr = attr_arr_org[mask_res]
+
+    #sort the arrays (ascending)
+    attr_arr = np.sort(attr_arr)
+    attr_res_arr = np.sort(attr_res_arr)
 
     #ASCII MAP HEADER
     header = "./Input/arcGISheader.txt"
-    return{'landroadclassmap': landroadclassmap, 'centerlist': centerlist, 'attrmap': attrmap, 'header': header}
+
+    return{'res_arr': attr_res_arr, 'all_array': attr_arr,'header': header}
+
+#naming graphs
+def graph_names(ltype, ctype, bnum, ischg):
+    outmapename = "./DataOut/analysis/" + ltype + ctype + str(bnum) + ischg + ".png"
+    outdataname = "./DataOut/analysis/" + ltype + ctype + str(bnum) + ischg + ".csv"
+    createdirectorynotexist(outmapename)
+
+    return{'outmapename': outmapename, 'outdataname': outdataname}
 
 # change y label to percent
 def to_percent(y, position):
@@ -91,8 +125,8 @@ def plotgraph(x, y, xsize, outfile, name, mapname):
     # set the grids of the x axis
     # When data are highly skewed, the ticks value needs to be
     # set differently for different number of baskets.
-        major_ticks = xrange(0, x[-1]+x[-1]-x[-2], x[-1]-x[-2])
-        minor_ticks = xrange(0, x[-1]+x[-1]-x[-2], max(1, (x[-1]-x[-2])/10))
+    major_ticks = xrange(0, x[-1]+x[-1]-x[-2], int((x[-1]+x[-1]-x[-2])/10))
+    minor_ticks = xrange(0, x[-1]+x[-1]-x[-2], max(1, int((x[-1]+x[-1]-x[-2])/100)))
 
     ax.set_xticks(major_ticks)
     ax.set_xticks(minor_ticks, minor=True)
@@ -110,6 +144,7 @@ def plotgraph(x, y, xsize, outfile, name, mapname):
     plt.gca().yaxis.set_major_formatter(formatter)
 
     #plot the graph and pinpoint the max y value point
+    x = np.insert(x, 0, 0) #if not this, x will be shorter than y
     plt.plot(x, y, 'ro--')
     ymax_index = np.argmax(y)
     ymax       = y[ymax_index]
@@ -118,114 +153,107 @@ def plotgraph(x, y, xsize, outfile, name, mapname):
     plt.grid(True)
 
     # save the figure to file
-    plt.savefig(outfile)
+    plt.savefig(outfile)  # cut 10 percentile tail and head values
 
-def frequencyanalysis_attr(attr_res_arr, attr_arr, attr_arr_x, RESCOM, ATTRFREQ, 
-                           ATTRBASE):
-    xlen = len(attr_arr_x)
-    attr_res_arr_nb         = attr_res_arr[attr_res_arr > ATTRBASE]
-    print "NUM ATTR " + RESCOM + " CELLS CONSIDERED: ", len(attr_res_arr_nb) 
-    attr_res_arr_nbsort     = np.sort(attr_res_arr_nb)
-    attr_res_basketsize_1st = len(attr_res_arr[attr_res_arr == ATTRBASE])
-    attr_basketsize_1st      = len(attr_arr    [attr_arr     == ATTRBASE])
-    attr_res_freq = [attr_res_basketsize_1st]
-    attr_arr_freq = [attr_basketsize_1st]
-    cur1 = attr_arr_x[1]
-    for i in xrange(2, xlen): #i is for cur2. in total ATTRBASKETNUM baskets.
-        cur2 = attr_arr_x[i]
-        mask = (attr_res_arr > cur1) & (attr_res_arr <= cur2)
-        attr_res_freq.append(len(attr_res_arr[mask]))
-        mask = (attr_arr > cur1) & (attr_arr <= cur2)
-        attr_arr_freq.append(len(attr_arr[mask]))
-        cur1 = cur2
-    attr_res_freq.append(len(attr_res_arr[attr_res_arr > cur1]))
-    attr_arr_freq.append(len(attr_arr[attr_arr > cur1]))
-    
-    print "---------------------attr_"+RESCOM.lower()+"_freq----------------\n",[int(i) for i in attr_res_freq]
-    print "---------------------attr_arr_freq----------------\n",[int(i) for i in attr_arr_freq]
-    attr_res_y = np.divide(attr_res_freq, attr_arr_freq, dtype=np.float)
-    attr_res_y = np.nan_to_num(attr_res_y)
-    print "---------------------attr_"+RESCOM.lower()+"_y----------------\n",attr_res_y
-    outgraphfname = ATTRFREQ[:-4]+"-"+str(sys.argv[1])+".png"
-    outdatafname = ATTRFREQ[:-4]+"-"+str(sys.argv[1])+".csv"
-    createdirectorynotexist(outgraphfname)
-    plotgraph(attr_arr_x, attr_res_y, xlen, outgraphfname, RESCOM, ATT)
-    outdata_arr = np.asarray([attr_arr_x, attr_res_freq, attr_arr_freq, attr_res_y])
+# csv output
+def write_data(x , y , outfile, name, mapname):
+    x = np.insert(x, 0, 0)  # if not this, x will be shorter than y
+    outdata_arr = np.asarray([x,y])
     outdata_arr = np.transpose(outdata_arr)
-    np.savetxt(outdatafname, outdata_arr,fmt='%5.5f',delimiter=',',
-                                         header="x,res/com,original,y", comments='')
+    np.savetxt(outfile, outdata_arr, fmt='%5.5f', delimiter=',',
+               header="x,y", comments='')
 
+#cut 5 percentile tail and head values, and mask the residential array
+def cut_values(attr_res_arr, attr_arr, bnum):
+
+    # create unique arrays from the attribute array
+    attr_uni = np.unique(attr_arr)
+
+    #find the high and low cutoff at 5 and 95 percentile
+    a_len = len(attr_uni)
+    low_ind = round(a_len * 0.1)
+    high_ind = round(a_len * 0.9)
+    low_cut = attr_uni[(low_ind-1)]
+    print low_cut
+    high_cut = attr_uni[(high_ind - 1)]
+    print high_cut
+
+    #make the cut
+    attr_arr = attr_arr[attr_arr >= low_cut]
+    attr_arr = attr_arr[attr_arr <= high_cut]
+    attr_res_arr = attr_res_arr[attr_res_arr >= low_cut]
+    attr_res_arr = attr_res_arr[attr_res_arr <= high_cut]
+
+    #create x axis values
+    attr_arr_len = len(attr_arr)
+    attrbasketsize = attr_arr_len / bnum
+    attr_arr_sort = np.sort(attr_arr)
+    attr_arr_x = attr_arr_sort[0:attr_arr_len - 1:attrbasketsize]  # the x axis tick values
+    attr_arr_x = attr_arr_x[0:bnum + 1]  # merge the last basket to the previous one
+    attr_arr_x = np.unique(attr_arr_x)
+
+    return {'attr_arr': attr_arr, 'attr_res_arr': attr_res_arr, 'attr_arr_x': attr_arr_x}
+
+
+#analyze frequency at each quantile cutoff
+def frequencyanalysis_attr(attr_res_arr, attr_arr, attr_arr_x):
+
+    xlen = len(attr_arr_x)
+    #attr_res_arr_nb         = attr_res_arr[attr_res_arr > ATTRBASE]
+    print " CELLS CONSIDERED: ", len(attr_res_arr)
+    #attr_arr_sort     = np.sort(attr_res_arr)
+    #attr_res_basketsize_1st = len(attr_res_arr[attr_res_arr == ATTRBASE])
+    #attr_basketsize_1st      = len(attr_arr    [attr_arr     == ATTRBASE])
+    attr_res_freq = [] # frequency array for residential cells
+    attr_arr_freq = [] # frequency array for all cells
+    cur1 = attr_arr_x[0] # initialize lower bound of the cutoff
+
+    #calculate the first basket
+    mask = (attr_res_arr >= 0) & (attr_res_arr <= cur1)  # residential cells with values within the cutoff
+    attr_res_freq.append(len(attr_res_arr[mask])) # add new residential frequency to the frequency array
+    mask = (attr_arr >= 0) & (attr_arr <= cur1) # all cells with values within the cutoff
+    attr_arr_freq.append(len(attr_arr[mask])) # add all cells frequency to the frequency array
+
+    for i in xrange(1, xlen): #i is for cur2. in total ATTRBASKETNUM baskets.
+        cur2 = attr_arr_x[i] # upper boundary of the cutoff
+        mask = (attr_res_arr > cur1) & (attr_res_arr <= cur2) # residential cells with values within the cutoff
+        attr_res_freq.append(len(attr_res_arr[mask])) # add new residential frequency to the frequency array
+        mask = (attr_arr > cur1) & (attr_arr <= cur2) # all cells with values within the cutoff
+        attr_arr_freq.append(len(attr_arr[mask])) # add all cells frequency to the frequency array
+        cur1 = cur2 #update lower bound of the cutoff
+
+    attr_res_freq.append(len(attr_res_arr[attr_res_arr > cur1])) #add final cuoff values
+    attr_arr_freq.append(len(attr_arr[attr_arr > cur1]))# add final cutoff values
+    
+    print "---------------------attr_res_freq----------------\n",[int(i) for i in attr_res_freq] #print res frequency
+    print "---------------------attr_arr_freq----------------\n",[int(i) for i in attr_arr_freq] #print total frequency
+    attr_res_y = np.divide(attr_res_freq, attr_arr_freq, dtype=np.float) # calculate y values on the axis
+    attr_res_y = np.nan_to_num(attr_res_y) # eliminate nan values
+    print "---------------------attr_y----------------\n",attr_res_y #print y values
+    return{'attr_res_y': attr_res_y, 'xlen':  xlen}
 
 
 def main():
+    dict = opt_parser()
+    [m_bnum, m_isemp, m_mapname] = [dict.get(k) for k in ('bnum','ctype','c_opts')]
 
-    emp = opt_parser()['ctype']
-    print emp
-    landroadclassmap = pd.read_csv(LANDROADCLASSMAP, sep=r"\s+", skiprows=6, header=None)
-    attrmap          = pd.read_csv(ATTRMAP, sep=r"\s+", skiprows=6, header=None)
-    attrmap          = attrmap.round().astype(np.int)
-    travelcostmap    = pd.read_csv(TRCOSTMAP, sep=r"\s+", skiprows=6, header=None)
-    travelcostmap    = travelcostmap.round().astype(np.int)
-    
-    # plt.hist(attrmap.values.flatten())
-    # plt.savefig("histogram.png")
-    # exit(1)
+    dict = data_loader(m_isemp)
+    [m_res_raw,m_all_raw] = [dict.get(k) for k in ('res_arr','all_array')]
 
-    landroad_arr   = landroadclassmap.values.flatten()
-    mask_noroad    = (landroad_arr > ROADCLASSMAX)
-    mask_res       = (landroad_arr > ROADCLASSMAX) & (landroad_arr >= RESIDENTIALMIN)& (landroad_arr <= RESIDENTIALMAX)
-    mask_com       = (landroad_arr > ROADCLASSMAX) & (landroad_arr >= COMMERCIALMIN) & (landroad_arr <= COMMERCIALMAX)
- 
-    attr_arr_org   = attrmap.values.flatten()
-    ATTRBASE       = attr_arr_org.min()
-    
-    attr_arr       = attr_arr_org[mask_noroad]
-    attr_res_arr   = attr_arr_org[mask_res]
-    attr_com_arr   = attr_arr_org[mask_com]
-    cost_arr_org   = travelcostmap.values.flatten()
-    COSTBASE       = cost_arr_org.min()
-    COSTMAX        = cost_arr_org.max()
-    cost_arr       = cost_arr_org[mask_noroad]
-    cost_res_arr   = cost_arr_org[mask_res]
-    cost_com_arr   = cost_arr_org[mask_com]
+    dict = cut_values(m_res_raw, m_all_raw, m_bnum)
+    [m_x, m_res, m_all] = [dict.get(k) for k in ('attr_arr_x', 'attr_res_arr', 'attr_arr')]
 
-    print "ATTRBASE: ", ATTRBASE
-    print "COSTBASE: ", ATTRBASE
-    print "COSTMAX: ", COSTMAX
+    dict = frequencyanalysis_attr(m_res, m_all, m_x)
+    [m_y, m_len] = [dict.get(k) for k in ('attr_res_y', 'xlen')]
+    m_name = 'res'
 
-    # find one x axis (quantile or equal interval) for attr_arr, attr_res_arr, attr_com_arr
-    # note that, about 63.5% attrmap cells have base value, so we do not consider base value cells
-    # when finding x axis for quantile. We will set attrbase as the first x tick.
-    attr_arr_nobase    = attr_arr[attr_arr > ATTRBASE]
-    print "NUM ATTR CELLS CONSIDERED: ", len(attr_arr_nobase)
-    attr_arr_nblen     = len(attr_arr_nobase)
-    attrbasketsize     = attr_arr_nblen/attrbasketnum
-    attr_arr_nbsort    = np.sort(attr_arr_nobase)
-    attr_arr_nbsort    = attr_arr_nbsort[0:attr_arr_nblen-1:attrbasketsize] # the x axis tick values 
-    attr_arr_x         = [ATTRBASE] + attr_arr_nbsort.tolist()  # need add one basket for base value
-    attr_arr_x         = attr_arr_x[0:attrbasketnum+1]                      # merge the last basket to the previous one
-    attr_arr_x         = np.unique(attr_arr_x)
-    print "---------------------attr_arr_x----------------\n", attr_arr_x
+    dict = graph_names(m_name, m_mapname, m_bnum, 'nochange')
+    [m_outgraph, m_outdata] = [dict.get(k) for k in ('outmapename', 'outdataname')]
 
-    frequencyanalysis_attr(attr_res_arr, attr_arr, attr_arr_x, RES, ATTRFREQ_RES, ATTRBASE)
-    frequencyanalysis_attr(attr_com_arr, attr_arr, attr_arr_x, COM, ATTRFREQ_COM, ATTRBASE)
+    plotgraph(m_x, m_y, m_len, str(m_outgraph), m_name, m_mapname)
+    write_data(m_x, m_y, str(m_outdata), m_name, m_mapname)
 
-    # find one x axis (quantile or equal interval) for attr_arr, attr_res_arr, attr_com_arr
-    # note that, about 63.5% attrmap cells have base value, so we do not consider base value cells
-    # when finding x axis for quantile. We will set attrbase as the first x tick.
-    cost_arr_nobase    = cost_arr[(cost_arr < COSTMAX)&(cost_arr > COSTBASE)]
-    print "NUM COST CELLS CONSIDERED: ", len(cost_arr_nobase)
-    cost_arr_nblen     = len(cost_arr_nobase)
-    costbasketsize     = cost_arr_nblen/costbasketnum
-    cost_arr_nbsort    = np.sort(cost_arr_nobase)
-    cost_arr_nbsort    = cost_arr_nbsort[COSTBASE+1:cost_arr_nblen-1:costbasketsize] # the x axis tick values 
-    cost_arr_nbsort    = cost_arr_nbsort[:-1]                                    # merge the last basket to the previous one
-    cost_arr_x         = np.insert(cost_arr_nbsort, 0, COSTBASE)
-    cost_arr_x         = np.unique(cost_arr_x)
-    print "---------------------cost_arr_x----------------\n",cost_arr_x
 
-    frequencyanalysis_cost(cost_res_arr, cost_arr, cost_arr_x, RES, COSTFREQ_RES, COSTMAX, COSTBASE)
-    frequencyanalysis_cost(cost_com_arr, cost_arr, cost_arr_x, COM, COSTFREQ_COM, COSTMAX, COSTBASE)
 
 if __name__ == "__main__":
     if (len(sys.argv) < 1):
