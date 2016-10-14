@@ -28,46 +28,81 @@ import time
 
 #option parsers -c centertype, -l landuse type, -t cost/attractiveness -s change or static map
 def opt_parser():
-    parse = OptionParser()
-    parse.add_option('-c', '--centers', metavar='CENTERTYPE', default=False,
-                    help='the center type can either be "emp" or "pop" ')
+    attrbasketnum = int(sys.argv[1])
 
+    parse = OptionParser()
+    #attraction map option
+    parse.add_option('-c', '--centers', metavar='CENTERTYPE', default=False,
+                    help='the center type can either be "empa" or "popa", etc... ') # attraction map option
+    parse.add_option('-l', '--lutype', metavar='LUTYPE', default=False,
+                     help='the center type can be "resn", "resc", "comn", or "comc"')  #number of tick bins
+    opts, args = parse.parse_args()
+
+    # attraction map option
+    c_dict = {'empa': [-1, "EmploymentAttr"], 'popa': [-2, "PopulationAttr"], 'otra':[1, "OtherRoadAtt"]}
     isemp = 0
     opts, args = parse.parse_args()
-    opts_c = opts.centers
     if not opts.centers:
-        opts_c = "pop"
-        isemp = 0
-        print "No centertype given. Default to be pop"
-    elif opts.centers == 'emp':
-        isemp = 1
-    elif opts.centers == 'pop':
-        isemp = 0
+        opts_c = "PopulationAttr" # this variable used for naming the outputs
+        isemp = -2
+        print "No centertype given. Default to be popa"
+    elif opts.centers in c_dict.keys():
+        opts_c = c_dict.get(opts.centers)[1]
+        isemp = c_dict.get(opts.centers)[0]
     else:
-        parse.error("-c option needs to be either 'emp' or 'pop'")
+        parse.error("-c option needs to be either 'empa' or 'popa', etc...")
 
-    attrbasketnum = int(sys.argv[1]) #number of tick bins
 
-    return{'bnum':attrbasketnum,'ctype': isemp, 'c_opts':opts_c}
+    # LUC map option
+    isres = 0
+    if not opts.lutype:
+        opts_l = "Residential_E"
+        isres = 0
+        print "No land-use type given. Default to be resn"
+    elif opts.lutype == 'resn':
+        opts_l = "Residential_E"
+        isres = 0
+    elif opts.lutype == 'resc':
+        opts_l = "Residential_C"
+        isres = 1
+    elif opts.lutype == 'comn':
+        opts_l = "Commercial_E"
+        isres = 2
+    elif opts.lutype == 'comc':
+        opts_l = "Commercial_C"
+        isres = 3
+    else:
+        parse.error('-l option needs to be "resn", "resc", "comn", or "comc"')
+
+    return{'bnum':attrbasketnum,'ctype': str(isemp), 'c_opts':opts_c,
+           'ltype': isres, 'l_opts': opts_l}
 
 
 #Data loader
-def data_loader(isemp):
-    isemp = opt_parser()['ctype']
-
+def data_loader(isemp, isres):
     #load different center map data based on different options
-    if isemp == 1:
-        #centerlist = "./Data/empcenterlist.txt" # load center list
-        attrmap = "./Data/emp_att.txt" # load attraction/travel-cost map
-        #freqmap = "./Data/analysis/emp/attrfreq-commericial" #frequency map creation
-
-    else:
-        #centerlist = "./Data/popcenterlist.txt"
-        attrmap = "./Data/pop_att.txt"
-        #freqmap = "./Data/analysis/pop/attrfreq-commericial.png"
+    d_dict = {'-1': "./Data/emp_att.txt", '-2': "./Data/pop_att.txt", '1': "./Data/01a_otherroads.txt"}
+    attrmap = d_dict.get(isemp)
 
     # load and flatten array for land-use class  for each cell
-    landroadclassmap_file = "./Data/2006asc.txt"  # load land-use map
+    # create mask for all cells and target cells
+    if isres == 0:
+        landroadclassmap_file = "./Data/2006asc.txt"  # load land-use map
+        all_cells = np.array([21, 22, 23, 31, 41, 42, 43, 52, 71, 81, 82, 85])
+        res_cells = np.array([21, 22])
+    elif isres == 1:
+        landroadclassmap_file = "./Data/2006_2011asc.txt"  # load land-use map
+        all_cells = np.array([300, 623, 723, 1021, 1022, 1023, 1080, 1082, 1085])
+        res_cells = np.array([1021, 1022])
+    elif isres == 2:
+        landroadclassmap_file = "./Data/2006asc.txt"  # load land-use map
+        all_cells = np.array([21, 22, 23, 31, 41, 42, 43, 52, 71, 81, 82, 85])
+        res_cells = np.array([23])
+    elif isres == 3:
+        landroadclassmap_file = "./Data/2006_2011asc.txt"  # load land-use map
+        all_cells = np.array([300, 623, 723, 1021, 1022, 1023, 1080, 1082, 1085])
+        res_cells = np.array([623, 723, 1023])
+
     landroadclassmap = pd.read_csv(landroadclassmap_file, sep=r"\s+", skiprows=6, header=None)
     landroad_arr = landroadclassmap.values.flatten()
 
@@ -77,9 +112,7 @@ def data_loader(isemp):
     attr_arr_org = attrmap.values.flatten()
 
 
-    # create mask for all cells and residential cells
-    all_cells = np.array([21, 22, 31, 41, 42, 43, 52, 71, 81, 82, 85])
-    res_cells = np.array([21, 22])
+
 
     #find the location of those cells in the mask
     mask_all = np.in1d(landroad_arr, all_cells)
@@ -99,9 +132,9 @@ def data_loader(isemp):
     return{'res_arr': attr_res_arr, 'all_array': attr_arr,'header': header}
 
 #naming graphs
-def graph_names(ltype, ctype, bnum, ischg):
-    outmapename = "./DataOut/analysis/" + ltype + ctype + str(bnum) + ischg + ".png"
-    outdataname = "./DataOut/analysis/" + ltype + ctype + str(bnum) + ischg + ".csv"
+def graph_names(ltype, ctype, bnum):
+    outmapename = "./DataOut/analysis/_" + ltype + " _ " + ctype + " _ " + str(bnum) + ".png"
+    outdataname = "./DataOut/analysis/_" + ltype + " _ " + ctype + " _ " + str(bnum) + ".csv"
     createdirectorynotexist(outmapename)
 
     return{'outmapename': outmapename, 'outdataname': outdataname}
@@ -125,7 +158,7 @@ def plotgraph(x, y, xsize, outfile, name, mapname):
     # set the grids of the x axis
     # When data are highly skewed, the ticks value needs to be
     # set differently for different number of baskets.
-    major_ticks = xrange(0, x[-1]+x[-1]-x[-2], int((x[-1]+x[-1]-x[-2])/10))
+    major_ticks = xrange(0, x[-1]+x[-1]-x[-2], max(1,int((x[-1]+x[-1]-x[-2])/10)))
     minor_ticks = xrange(0, x[-1]+x[-1]-x[-2], max(1, int((x[-1]+x[-1]-x[-2])/100)))
 
     ax.set_xticks(major_ticks)
@@ -134,11 +167,11 @@ def plotgraph(x, y, xsize, outfile, name, mapname):
     ax.grid(which='major', alpha=0.5)
 
     # set the range of the y axis
-    plt.ylim(0, 1)
+    plt.ylim(0, np.amax(y))
     # set the title and labels
     plt.title(name +' ' + mapname + ' Frequency Distribution')
     plt.xlabel(mapname + ' Score')
-    plt.ylabel('Fraction ' + name + ' Over All Landuse Type ' + mapname +' Frequency')
+    plt.ylabel('Fraction ' + name + ' Over All Landuse Type' + '\n' + 'ny' + mapname +' Frequency')
     # set the y axis values to be 100% times.
     formatter = FuncFormatter(to_percent)
     plt.gca().yaxis.set_major_formatter(formatter)
@@ -151,6 +184,7 @@ def plotgraph(x, y, xsize, outfile, name, mapname):
     ymax_xval  = x[ymax_index]
     plt.scatter(ymax_xval, ymax*100)
     plt.grid(True)
+    plt.tight_layout()
 
     # save the figure to file
     plt.savefig(outfile)  # cut 10 percentile tail and head values
@@ -235,9 +269,10 @@ def frequencyanalysis_attr(attr_res_arr, attr_arr, attr_arr_x):
 
 def main():
     dict = opt_parser()
-    [m_bnum, m_isemp, m_mapname] = [dict.get(k) for k in ('bnum','ctype','c_opts')]
+    [m_bnum, m_isemp, m_isres, m_attr_name,m_lu_name] =\
+        [dict.get(k) for k in ('bnum','ctype', 'ltype','c_opts','l_opts')]
 
-    dict = data_loader(m_isemp)
+    dict = data_loader(m_isemp, m_isres)
     [m_res_raw,m_all_raw] = [dict.get(k) for k in ('res_arr','all_array')]
 
     dict = cut_values(m_res_raw, m_all_raw, m_bnum)
@@ -245,13 +280,12 @@ def main():
 
     dict = frequencyanalysis_attr(m_res, m_all, m_x)
     [m_y, m_len] = [dict.get(k) for k in ('attr_res_y', 'xlen')]
-    m_name = 'res'
 
-    dict = graph_names(m_name, m_mapname, m_bnum, 'nochange')
+    dict = graph_names(m_lu_name, m_attr_name, m_bnum)
     [m_outgraph, m_outdata] = [dict.get(k) for k in ('outmapename', 'outdataname')]
 
-    plotgraph(m_x, m_y, m_len, str(m_outgraph), m_name, m_mapname)
-    write_data(m_x, m_y, str(m_outdata), m_name, m_mapname)
+    plotgraph(m_x, m_y, m_len, str(m_outgraph), m_lu_name, m_attr_name)
+    write_data(m_x, m_y, str(m_outdata), m_lu_name, m_attr_name)
 
 
 
