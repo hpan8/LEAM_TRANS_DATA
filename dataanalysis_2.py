@@ -1,7 +1,8 @@
 """
 This script will do:
 1. (optional)-overlap the miniumum of 100 travelcost maps to have a complete travelcost map. ./Data/travelcost-pop.txt
-2. read the interpolated attrmap and the travelcost map into an array seperately, and create a dictionary to map them. Sort.
+2. read the interpolated attrmap and the travelcost map into an array seperately, and create a dictionary to map them.
+    Sort.
 3. use the two arrays and matplotlib libarary and ggplot2 to generate:
    (1) travelcost vs. attractiveness graph
    (2) travelcost vs. low&high residential frequency (type 21, 22)
@@ -11,7 +12,6 @@ This script will do:
 
 """
 
-#from ggplot import * #ggplot is best to be used with pandas DataFrames
 import sys
 import numpy as np
 import pandas as pd
@@ -39,7 +39,14 @@ def opt_parser():
     opts, args = parse.parse_args()
 
     # attraction map option
-    c_dict = {'empa': [-1, "EmploymentAttr"], 'popa': [-2, "PopulationAttr"], 'otra':[1, "OtherRoadAtt"]}
+    c_dict = {'empa': [-1, "EmploymentAttr"], 'popa': [-2, "PopulationAttr"],
+              'empc': [-11, "EmploymentCost"], 'popc': [-22, "PopulationCost"],
+              'otra': [1, "OtherRoadAtt"], 'mpopa': [6, "MultiPopAttr"], 'mpopc': [7, "MultiPopCost"],
+              'mempa': [8, "MultiEmpAttr"], 'mempc': [9, "MultiEmpCost"], 'statec': [10, "StateCost"],
+              'countyc': [11, "CountyCost"], 'roadc': [12, "RoadCost"], 'ramp': [13, "RampCost"],
+              'intsectc': [14, "IntSectCost"], 'transc': [15, "TransportCost"], 'waterc': [16, "WaterCost"],
+              'frstc': [17, "ForestCost"], 'slopec': [18, "SlopeCost"]
+              }
     isemp = 0
     opts, args = parse.parse_args()
     if not opts.centers:
@@ -53,7 +60,7 @@ def opt_parser():
         parse.error("-c option needs to be either 'empa' or 'popa', etc...")
 
 
-    # LUC map option
+    #LUC map option
     isres = 0
     if not opts.lutype:
         opts_l = "Residential_E"
@@ -81,7 +88,13 @@ def opt_parser():
 #Data loader
 def data_loader(isemp, isres):
     #load different center map data based on different options
-    d_dict = {'-1': "./Data/emp_att.txt", '-2': "./Data/pop_att.txt", '1': "./Data/01a_otherroads.txt"}
+    d_dict = {'-1': "./Data/emp_att.txt", '-2': "./Data/pop_att.txt", '1': "./Data/01a_otherroads.txt",
+              '6': "./Data/06a_mpop_att.txt", '7': "./Data/07c_mpop_cost.txt", '8': "./Data/08a_memp_att.txt",
+              '9': "./Data/09c_memp_cost.txt", '10': "./Data/10c_staterd_cost.txt", '11': "./Data/11c_county_cost.txt",
+              '12': "./Data/12c_road_cost.txt", '13': "./Data/13c_ramp_cost.txt", '14': "/Data/14c_intersect_cost.txt",
+              '15': "./Data/15a_transport_att.txt", '16': "./Data/16c_water_cost.txt",
+              '17': "./Data/17c_forest_cost.txt", '18': "./Data/18c_slope_cost.txt"}
+
     attrmap = d_dict.get(isemp)
 
     # load and flatten array for land-use class  for each cell
